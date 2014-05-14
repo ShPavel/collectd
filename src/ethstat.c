@@ -337,8 +337,8 @@ static int ethstat_read_interface_settings (char *device)
   struct ifreq req;
   struct ethtool_cmd if_settings;
 
-  unsigned int speed;
-  unsigned int duplex;
+  uint32_t speed;
+  uint8_t duplex;
 
   int status;
 
@@ -369,7 +369,7 @@ static int ethstat_read_interface_settings (char *device)
     return (-1);
   }
 
-  speed = if_settings.speed;
+  speed = ethtool_cmd_speed(&if_settings);
   duplex = if_settings.duplex;
 
   ethstat_submit_value (device, "duplex", (derive_t) duplex);
