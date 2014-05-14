@@ -55,6 +55,7 @@ static size_t interfaces_num = 0;
 static c_avl_tree_t *value_map = NULL;
 
 static _Bool collect_mapped_only = 0;
+static _Bool report_settings = 0;
 
 static int ethstat_add_interface (const oconfig_item_t *ci) /* {{{ */
 {
@@ -162,6 +163,8 @@ static int ethstat_config (oconfig_item_t *ci) /* {{{ */
       ethstat_add_map (child);
     else if (strcasecmp ("MappedOnly", child->key) == 0)
       (void) cf_util_get_boolean (child, &collect_mapped_only);
+    else if (strcasecmp ("ReportSettings", child->key) == 0)
+      (void) cf_util_get_boolean (child, &report_settings);
     else
       WARNING ("ethstat plugin: The config option \"%s\" is unknown.",
           child->key);
@@ -328,12 +331,66 @@ static int ethstat_read_interface (char *device)
   return (0);
 } /* }}} ethstat_read_interface */
 
+static int ethstat_read_interface_settings (char *device)
+{
+  int fd;
+  struct ifreq req;
+  struct ethtool_cmd if_settings;
+
+  unsigned int speed;
+  unsigned int duplex;
+
+  int status;
+
+  memset (&req, 0, sizeof (req));
+  sstrncpy(req.ifr_name, device, sizeof (req.ifr_name));
+
+  fd = socket(AF_INET, SOCK_DGRAM, /* protocol = */ 0);
+  if (fd < 0)
+  {
+    char errbuf[1024];
+    ERROR("ethstat plugin: Failed to open control socket: %s",
+        sstrerror (errno, errbuf, sizeof (errbuf)));
+    return 1;
+  }
+
+  req.ifr_data = (void*) &if_settings;
+
+  if_settings.cmd = ETHTOOL_GSET;
+
+  status = ioctl (fd, SIOCETHTOOL, &req);
+  if (status < 0)
+  {
+    char errbuf[1024];
+    close (fd);
+    ERROR("ethstat plugin: Reading statistics from %s failed: %s",
+        device,
+        sstrerror (errno, errbuf, sizeof (errbuf)));
+    return (-1);
+  }
+
+  speed = if_settings.speed;
+  duplex = if_settings.duplex;
+
+  ethstat_submit_value (device, "duplex", (derive_t) duplex);
+  ethstat_submit_value (device, "speed", (derive_t) speed);
+
+  close (fd);
+
+  return (0);
+} /* }}} ethstat_read_interface_settings */
+
+
 static int ethstat_read(void)
 {
   size_t i;
 
   for (i = 0; i < interfaces_num; i++)
     ethstat_read_interface (interfaces[i]);
+
+  if(report_settings)
+    for (i = 0; i < interfaces_num; i++)
+      ethstat_read_interface_settings (interfaces[i]);
 
   return 0;
 }
